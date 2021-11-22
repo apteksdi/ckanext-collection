@@ -3,7 +3,8 @@ import ckan.plugins.toolkit as toolkit
 from routes.mapper import SubMapper
 from ckan.lib.plugins import DefaultTranslation
 import json
-from ckanext.collection.logic import action
+import ckanext.create_typed_package.logic.action as action
+#from ckanext.collection.logic import action
 from ckan.logic import get_action
 from ckan.common import OrderedDict, _
 
