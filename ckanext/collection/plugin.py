@@ -1,107 +1,114 @@
 import ckan.plugins as plugins
 import ckan.plugins.toolkit as toolkit
-import ckan.logic.schema as ckan_schema
+from routes.mapper import SubMapper
+from ckan.lib.plugins import DefaultTranslation
+import json
+from ckanext.collection.logic import action
+from ckan.logic import get_action
+from ckan.common import OrderedDict, _
 
-import routes
+import logging
+log = logging.getLogger(__name__)
 
-
-class CollectionsPlugin(plugins.SingletonPlugin):
+class CollectionPlugin(plugins.SingletonPlugin, DefaultTranslation):
     plugins.implements(plugins.IConfigurer)
-    plugins.implements(plugins.IGroupForm, inherit=True)
-    plugins.implements(plugins.IPackageController, inherit=True)
     plugins.implements(plugins.IRoutes, inherit=True)
-
-    def group_types(self):
-		return ('collection',)
-
-    def group_controller(self):
-    	return 'collection'
-
-    def is_fallback(self):
-		False
-
-    def form_to_db_schema(self):
-		schema = ckan_schema.group_form_schema()
-
-		return schema
-
-    def group_form(group_type='collection'):
-        return 'collection/snippets/collection_form.html'
-
-    def index_template(self):
-        return 'collection/index.html'
-
-    def read_template(self):
-        return 'collection/read.html'
-
-    def new_template(self):
-        return 'collection/new.html'
-
-    def edit_template(self):
-        return 'collection/edit.html'
-
-    def about_template(self):
-        return 'collection/about.html'
-
-    def history_template(self):
-        return 'collection/history.html'
-
-    def activity_template(self):
-    	return 'collection/activity_stream.html'
-
-    def admins_template(self):
-    	return 'collection/admins.html'
+    plugins.implements(plugins.IPackageController, inherit=True)
+    if toolkit.check_ckan_version(min_version='2.5.0'):
+        plugins.implements(plugins.ITranslation, inherit=True)
+    plugins.implements(plugins.IActions, inherit=True)
+    plugins.implements(plugins.IFacets, inherit=True)
 
     # IConfigurer
 
     def update_config(self, config_):
         toolkit.add_template_directory(config_, 'templates')
         toolkit.add_public_directory(config_, 'public')
-        toolkit.add_resource('fanstatic', 'collections')
+        toolkit.add_resource('fanstatic', 'collection')
+
+    def update_config_schema(self, schema):
+        ignore_missing = toolkit.get_validator('ignore_missing')
+
+        schema.update({
+            'ckanext.collection.api_collection_name_or_id': [ignore_missing, unicode],
+        })
+
+        return schema
 
     # IRoutes
+
     def before_map(self, map):
-        '''
-        Map custom controllers and endpoints
-        '''
-        package_controller = "ckanext.collections.controller:CollectionsPackageController"
+        with SubMapper(map, controller='ckanext.collection.controller:CollectionController') as m:
+            m.connect('collection.index', '/collection', action='index')
 
-        with routes.mapper.SubMapper(map, controller=package_controller) as m:
-                m.connect('dataset_collections', '/dataset/collections/{id}',
-                  action='collections', ckan_icon='group')
-                m.connect('dataset_groups', '/dataset/groups/{id}',
-                  action='groups', ckan_icon='group')
+            m.connect('collection.new', '/collection/new', action='new')
 
+            m.connect('collection.read', '/collection/:id', action='read')
 
-        collection_controller = 'ckanext.collections.controller:CollectionController'
+            m.connect('collection.members', '/collection/:id/members', action='members')
 
-        with routes.mapper.SubMapper(map, controller=collection_controller) as m:
-	        m.connect('collection_index', '/collection', action='index')
-	        m.connect('/collection/list', action='list')
-	        m.connect('/collection/new', action='new')
-	        m.connect('/collection/{action}/{id}',
-	                requirements=dict(action='|'.join([
-	                    'delete',
-	                    'admins',
-	                    'member_new',
-	                    'member_delete',
-	                    'history'
-	                    'followers',
-	                    'follow',
-	                    'unfollow',
-	                ])))
-	        m.connect('collection_activity', '/collection/activity/{id}/{offset}',
-	                action='activity', ckan_icon='time')
-	        m.connect('collection_read', '/collection/{id}', action='read')
-	        m.connect('collection_about', '/collection/about/{id}',
-	                action='about', ckan_icon='info-sign')
-	        m.connect('collection_read', '/collection/{id}', action='read',
-	                ckan_icon='sitemap')
-	        m.connect('collection_edit', '/collection/edit/{id}',
-	                action='edit', ckan_icon='edit')
-	        m.connect('collection_members', '/collection/members/{id}',
-	                action='members', ckan_icon='group')
-	        m.connect('collection_bulk_process',
-	                '/collection/bulk_process/{id}',
-                    action='bulk_process', ckan_icon='sitemap')
-    	return map
+            m.connect('collection.edit', '/collection/edit/:id', action='edit')
+
+            m.connect('collection.delete', '/collection/delete/:id', action='delete')
+
+            m.connect('collection.about', '/collection/about/:id', action='about')
+
+            m.connect('dataset_collection_list', '/dataset/collections/{id}',
+                      action='dataset_collection_list', ckan_icon='picture')
+
+        map.redirect('/collections', '/collection')
+
+        return map
+
+    def before_index(self, data_dict):
+        groups = json.loads(data_dict.get('data_dict', {})).get('groups',[])
+
+        data_dict['collections'] = [group.get('name', '') for group in groups if group.get('type', "") == 'collection']
+
+        groups_to_remove = [group.get('name', '') for group in groups if group.get('type', "") == 'collection']
+        data_dict['groups'] = [group for group in data_dict['groups'] if group not in groups_to_remove]
+
+        return data_dict
+
+    def after_search(self, search_results, search_params):
+        if search_results['search_facets'].get('collections'):
+            context = {'for_view': True, 'with_private': False}
+            data_dict = {
+                'all_fields': True,
+                'include_extras': True,
+                'type': 'collection'
+            }
+            collections_with_extras =get_action('group_list')(context, data_dict)
+
+            for i, facet in enumerate(search_results['search_facets']['collections'].get('items', [])):
+                for collection in collections_with_extras:
+                    if facet['name'] == collection['name']:
+                        search_results['search_facets']['collections']['items'][i]['title_translated'] = collection.get('title_translated')
+                        if not collection.get('title_translated').get('en'):
+                            search_results['search_facets']['collections']['items'][i]['title_translated']['en'] = collection.get('title')
+                        if not collection.get('title_translated').get('sv'):
+                            search_results['search_facets']['collections']['items'][i]['title_translated']['sv'] = collection.get('title')
+
+        return search_results
+
+    # IActions
+
+    def get_actions(self):
+        return {
+            'group_list_authz': action.group_list_authz,
+            'api_collection_show': action.api_collection_show
+        }
+
+    # IFacets
+
+    def group_facets(self, facets_dict, group_type, package_type):
+
+        if(group_type == 'collection'):
+            facets_dict = OrderedDict()
+            facets_dict.update({'res_format': _('Formats')})
+            facets_dict.update({'vocab_geographical_coverage': _('Geographical Coverage')})
+            facets_dict.update({'groups': _('Groups')})
+            facets_dict.update({'organization': _('Organizations')})
+            facets_dict.update({'collections': _('Collections')})
+
+        return facets_dict
