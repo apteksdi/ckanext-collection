@@ -4,10 +4,7 @@ from routes.mapper import SubMapper
 from ckan.lib.plugins import DefaultTranslation
 import json
 import ckanext.create_typed_package.logic.action as action
-#from ckanext.collection.logic import action
 from ckan.logic import get_action
-#from ckan.common import OrderedDict
-
 
 import logging
 log = logging.getLogger(__name__)
@@ -106,7 +103,6 @@ class CollectionPlugin(plugins.SingletonPlugin, DefaultTranslation):
     def group_facets(self, facets_dict, group_type, package_type):
 
         if(group_type == 'collection'):
-           # facets_dict = OrderedDict()
             facets_dict.update({'res_format': _('Formats')})
             facets_dict.update({'vocab_geographical_coverage': _('Geographical Coverage')})
             facets_dict.update({'groups': _('Groups')})
