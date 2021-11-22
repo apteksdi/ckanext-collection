@@ -6,7 +6,7 @@ import json
 import ckanext.create_typed_package.logic.action as action
 #from ckanext.collection.logic import action
 from ckan.logic import get_action
-from ckan.common import OrderedDict, _
+from ckan.common import OrderedDict
 
 
 import logging
